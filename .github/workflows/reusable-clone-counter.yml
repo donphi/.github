@@ -4,7 +4,6 @@ on:
     secrets:
       SECRET_TOKEN:
         required: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,13 +13,24 @@ jobs:
       - name: gh login
         run: echo "${{ secrets.SECRET_TOKEN }}" | gh auth login --with-token
 
+      # Replace the old parse latest clone count with this new one
       - name: parse latest clone count
         run: |
+          # Create an empty clone.json if it doesn't exist
+          echo '{"count": 0, "uniques": 0, "clones": []}' > clone.json
+          
+          # Try to get the latest data
           curl --user "${{ github.actor }}:${{ secrets.SECRET_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/${{ github.repository }}/traffic/clones \
-            > clone.json
+            > clone_latest.json
+            
+          # If we got valid data, use it
+          if [ -s clone_latest.json ] && jq empty clone_latest.json 2>/dev/null; then
+            mv clone_latest.json clone.json
+          fi
 
+      # Replace the old create gist section with this new one
       - name: create gist and download previous count
         id: set_id
         run: |
@@ -28,14 +38,11 @@ jobs:
           then
               echo "GIST_ID found"
               echo "GIST=${{ secrets.GIST_ID }}" >> $GITHUB_OUTPUT
-              curl https://gist.githubusercontent.com/${{ github.actor }}/${{ secrets.GIST_ID }}/raw/clone.json > clone_before.json
-              if cat clone_before.json | grep '404: Not Found'; then
-                echo "GIST_ID not valid anymore. Creating another gist..."
-                gist_id=$(gh gist create clone.json | awk -F / '{print $NF}')
-                echo $gist_id | gh secret set GIST_ID
-                echo "GIST=$gist_id" >> $GITHUB_OUTPUT
-                cp clone.json clone_before.json
-                git rm --ignore-unmatch  CLONE.md
+              # Create an empty clone_before.json if download fails
+              echo '{"count": 0, "uniques": 0, "clones": []}' > clone_before.json
+              curl -s https://gist.githubusercontent.com/${{ github.actor }}/${{ secrets.GIST_ID }}/raw/clone.json > clone_before_temp.json
+              if [ -s clone_before_temp.json ] && jq empty clone_before_temp.json 2>/dev/null; then
+                mv clone_before_temp.json clone_before.json
               fi
           else
               echo "GIST_ID not found. Creating a gist..."
